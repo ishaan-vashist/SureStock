@@ -1,24 +1,9 @@
-import express, { Application } from 'express';
 import { env } from './config/env';
 import { connect } from './db/mongoose';
 import { logger } from './utils/logger';
-import { corsMiddleware } from './middleware/cors';
-import { errorHandler } from './middleware/errors';
-import routes from './routes';
 import { createIndexes } from './models';
-
-const app: Application = express();
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(corsMiddleware);
-
-// Routes
-app.use(routes);
-
-// Error handler (must be last)
-app.use(errorHandler);
+import { gcService } from './services/gc.service';
+import app from './app';
 
 // Bootstrap function
 async function bootstrap(): Promise<void> {
@@ -29,6 +14,9 @@ async function bootstrap(): Promise<void> {
     // Create database indexes
     await createIndexes();
 
+    // Start GC service (runs every 60 seconds)
+    gcService.start(60000);
+
     // Start server
     app.listen(env.PORT, () => {
       logger.info('Server started', {
@@ -36,6 +24,19 @@ async function bootstrap(): Promise<void> {
         nodeEnv: env.NODE_ENV,
         corsOrigin: env.CORS_ORIGIN,
       });
+    });
+
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM received, shutting down gracefully');
+      gcService.stop();
+      process.exit(0);
+    });
+
+    process.on('SIGINT', () => {
+      logger.info('SIGINT received, shutting down gracefully');
+      gcService.stop();
+      process.exit(0);
     });
   } catch (error) {
     logger.error('Failed to start server', {
@@ -45,7 +46,7 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-// Start the application
-bootstrap();
-
-export default app;
+// Only start server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  bootstrap();
+}

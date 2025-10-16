@@ -222,18 +222,34 @@ backend/
 │   │   ├── IdempotencyKey.ts
 │   │   └── index.ts
 │   ├── routes/          # API routes
+│   │   ├── cart.ts
+│   │   ├── checkout.ts
+│   │   ├── admin.ts
 │   │   ├── health.ts
 │   │   └── index.ts
+│   ├── services/        # Business logic
+│   │   ├── cart.service.ts
+│   │   ├── reservation.service.ts
+│   │   ├── order.service.ts
+│   │   └── gc.service.ts
 │   ├── utils/           # Utility functions
 │   │   ├── hash.ts
 │   │   ├── logger.ts
 │   │   └── time.ts
+│   ├── app.ts           # Express app configuration
 │   └── index.ts         # Application entry point
-├── tests/               # Test files
+├── tests/               # Test files (47 tests)
+│   ├── cart.test.ts
+│   ├── reservation.test.ts
+│   ├── confirm.test.ts
+│   ├── gc.test.ts
+│   ├── admin.test.ts
+│   └── setup.ts
 ├── scripts/             # Utility scripts
 │   ├── seed.ts
 │   └── unseed.ts
 ├── .env.example         # Environment template
+├── jest.config.js       # Jest configuration
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -241,13 +257,147 @@ backend/
 
 ## API Endpoints
 
-### Health
-- `GET /api/healthz` - Health check endpoint
+All endpoints (except health) require `x-user-id` header for authentication.
 
-### Future Endpoints
-- Cart management (`/api/cart`)
-- Checkout flow (`/api/checkout`)
-- Admin operations (`/api/admin`)
+### Health
+
+**GET /api/healthz**
+- No authentication required
+- Returns server and database status
+
+```bash
+curl http://localhost:8080/api/healthz
+```
+
+### Cart Management
+
+**GET /api/cart**
+- Get user's cart with product snapshots and availability
+- Returns: `{ items: [...], total: number }`
+
+```bash
+curl -H "x-user-id: demo-user" http://localhost:8080/api/cart
+```
+
+**POST /api/cart**
+- Add or update item in cart
+- Body: `{ productId: string, qty: number }` (qty must be 1-5)
+- Returns: `{ message: string }`
+
+```bash
+curl -X POST http://localhost:8080/api/cart \
+  -H "x-user-id: demo-user" \
+  -H "Content-Type: application/json" \
+  -d '{"productId": "60d5ec49f1b2c72b8c8e4f1a", "qty": 3}'
+```
+
+**PATCH /api/cart/:productId**
+- Update item quantity
+- Body: `{ qty: number }` (qty must be 1-5)
+- Returns: `{ message: string }`
+
+```bash
+curl -X PATCH http://localhost:8080/api/cart/60d5ec49f1b2c72b8c8e4f1a \
+  -H "x-user-id: demo-user" \
+  -H "Content-Type: application/json" \
+  -d '{"qty": 5}'
+```
+
+**DELETE /api/cart/:productId**
+- Remove item from cart
+- Returns: `{ message: string }`
+
+```bash
+curl -X DELETE http://localhost:8080/api/cart/60d5ec49f1b2c72b8c8e4f1a \
+  -H "x-user-id: demo-user"
+```
+
+### Checkout - Reservation
+
+**POST /api/checkout/reserve**
+- Create a reservation with 10-minute TTL
+- All-or-nothing: either all items are reserved or none
+- Uses MongoDB transactions for concurrency safety
+- Body: `{ address: {...}, shippingMethod: 'standard' | 'express' }`
+- Returns: `{ reservationId: string, expiresAt: Date }`
+- Errors:
+  - `400` - Empty cart or validation failure
+  - `409` - Insufficient stock (race condition handled)
+
+```bash
+curl -X POST http://localhost:8080/api/checkout/reserve \
+  -H "x-user-id: demo-user" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": {
+      "name": "John Doe",
+      "phone": "1234567890",
+      "line1": "123 Main St",
+      "city": "New York",
+      "state": "NY",
+      "pincode": "10001"
+    },
+    "shippingMethod": "standard"
+  }'
+```
+
+**GET /api/checkout/reservation/:id**
+- Get reservation details
+- Returns reservation with `isValid` flag
+
+```bash
+curl -H "x-user-id: demo-user" \
+  http://localhost:8080/api/checkout/reservation/60d5ec49f1b2c72b8c8e4f1a
+```
+
+### Checkout - Confirm Order
+
+**POST /api/checkout/confirm**
+- Confirm order with idempotency
+- **Requires**: `Idempotency-Key` header (UUID)
+- Body: `{ reservationId: string }`
+- Returns: `{ orderId: string, status: 'created' }`
+- Errors:
+  - `400` - Missing idempotency key
+  - `404` - Reservation not found
+  - `409` - Idempotency key reused for different payload
+  - `410` - Reservation expired or already consumed
+
+```bash
+curl -X POST http://localhost:8080/api/checkout/confirm \
+  -H "x-user-id: demo-user" \
+  -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
+  -H "Content-Type: application/json" \
+  -d '{"reservationId": "60d5ec49f1b2c72b8c8e4f1a"}'
+```
+
+**Idempotency Behavior**:
+- Same `Idempotency-Key` with same payload → returns same `orderId` (no duplicate orders)
+- Same `Idempotency-Key` with different payload → 409 error
+- Retries are safe and never duplicate orders or double-decrement inventory
+
+### Admin - Low Stock Alerts
+
+**GET /api/admin/low-stock-alerts**
+- List low-stock alerts
+- Query params: `?processed=true|false` (optional filter)
+- Returns: `{ count: number, alerts: [...] }`
+
+```bash
+# Get all unprocessed alerts
+curl -H "x-user-id: admin" \
+  "http://localhost:8080/api/admin/low-stock-alerts?processed=false"
+```
+
+**POST /api/admin/low-stock-alerts/:id/ack**
+- Mark alert as processed
+- Returns: `{ message: string, alert: {...} }`
+
+```bash
+curl -X POST \
+  -H "x-user-id: admin" \
+  http://localhost:8080/api/admin/low-stock-alerts/60d5ec49f1b2c72b8c8e4f1a/ack
+```
 
 ## Architecture Principles
 
@@ -259,7 +409,20 @@ backend/
 ### Reservation System
 - TTL: 10 minutes
 - All-or-nothing reservation (no partial fulfillment)
-- Background GC job expires stale reservations
+- Background GC job expires stale reservations every 60 seconds
+- Automatic stock release on expiry
+
+### Background GC Service
+- **Purpose**: Automatically expire reservations and release reserved stock
+- **Interval**: Runs every 60 seconds
+- **Process**:
+  1. Finds reservations where `status='active'` and `expiresAt ≤ now`
+  2. For each expired reservation (in a transaction):
+     - Decrements `reserved` by quantity for each item
+     - Marks reservation as `'expired'`
+  3. Logs statistics: expired count, released items, errors
+- **Startup**: Automatically starts with the server
+- **Shutdown**: Gracefully stops on SIGTERM/SIGINT
 
 ### Idempotency
 - Checkout confirm is idempotent using `Idempotency-Key` header (UUID)
@@ -314,10 +477,207 @@ All errors return: `{ error: "message" }`
 - Unseed script to clear database
 - Deterministic faker seed for reproducibility
 
-### 🔜 Next Phases
-- Cart CRUD endpoints
-- Reservation and checkout flow with transactions
-- Idempotency handling for confirm
-- Low-stock alerts
-- Background GC worker for expired reservations
-- Comprehensive test suite (≥6 tests)
+### ✅ Phase 3 - Cart API
+- GET /api/cart with product snapshots and availability
+- POST /api/cart to add/update items
+- PATCH /api/cart/:productId to update quantity
+- DELETE /api/cart/:productId to remove items
+- Validation: qty must be 1-5
+- Tests: CRUD operations and validation
+
+### ✅ Phase 4 - Reservation API
+- POST /api/checkout/reserve with MongoDB transactions
+- All-or-nothing reservation (no partial holds)
+- Conditional atomic updates: `stock - reserved >= qty`
+- Deterministic product ordering to reduce deadlocks
+- 10-minute TTL on reservations
+- Race condition handling with 409 Conflict
+- Tests: success, insufficient stock, race conditions
+
+### ✅ Phase 5 - Confirm API with Idempotency
+- POST /api/checkout/confirm with idempotency support
+- Requires `Idempotency-Key` header (UUID)
+- Request hash validation to prevent key reuse
+- Transactional order creation and stock commit
+- Atomic updates: decrements both `reserved` and `stock`
+- Cart clearing on successful order
+- Low-stock alert creation when `stock < threshold`
+- Tests: success, idempotency, key reuse rejection, expired reservations
+
+### ✅ Phase 6 - Reservation Expiry GC
+- Background garbage collection service
+- Runs every 60 seconds automatically
+- Finds expired reservations (`status='active'` and `expiresAt ≤ now`)
+- Releases reserved stock transactionally
+- Marks reservations as `'expired'`
+- Graceful shutdown handling
+- Tests: single/multiple expiry, non-expired handling, service control
+
+### ✅ Phase 7 - Admin Low-Stock Alerts
+- GET /api/admin/low-stock-alerts with filtering
+- POST /api/admin/low-stock-alerts/:id/ack to mark processed
+- Alerts created automatically when stock falls below threshold
+- Populated product details in responses
+- Tests: listing, filtering, acknowledgment, integration workflow
+
+### ✅ Phase 8 - Comprehensive Testing
+- **47 tests** across 5 test suites (required: ≥6)
+- Cart CRUD & totals (11 tests)
+- Reservation success & race conditions (9 tests)
+- Confirm success & idempotency (8 tests)
+- GC expiry & service control (8 tests)
+- Admin alerts & workflow (11 tests)
+- All tests independent with DB reset between specs
+- Test coverage: concurrency, idempotency, edge cases
+
+## Deployment
+
+### MongoDB Atlas Setup
+
+1. **Create a cluster**:
+   - Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+   - Create a free M0 cluster
+   - **Important**: Ensure it's a replica set (required for transactions)
+
+2. **Get connection string**:
+   - Click "Connect" → "Connect your application"
+   - Copy the connection string
+   - Replace `<password>` with your database user password
+   - Add database name: `?retryWrites=true&w=majority`
+
+3. **Whitelist IP**:
+   - Add `0.0.0.0/0` to allow connections from anywhere (for development)
+   - For production, whitelist specific IPs
+
+### Backend Deployment (Render/Railway)
+
+#### Using Render:
+
+1. **Create Web Service**:
+   - Connect your GitHub repository
+   - Build Command: `npm install && npm run build`
+   - Start Command: `npm start`
+
+2. **Environment Variables**:
+   ```
+   MONGODB_URI=mongodb+srv://...
+   PORT=8080
+   NODE_ENV=production
+   CORS_ORIGIN=https://your-frontend-url.vercel.app
+   ```
+
+3. **Health Check**:
+   - Path: `/api/healthz`
+   - Expected: 200 OK
+
+#### Using Railway:
+
+1. **Deploy from GitHub**:
+   - Connect repository
+   - Railway auto-detects Node.js
+
+2. **Add Environment Variables** (same as above)
+
+3. **Custom Start Command** (if needed):
+   ```
+   npm run build && npm start
+   ```
+
+### Production Checklist
+
+- [ ] MongoDB Atlas cluster created (replica set)
+- [ ] Database seeded with products (`npm run seed`)
+- [ ] Environment variables configured
+- [ ] CORS_ORIGIN set to frontend URL
+- [ ] Health check endpoint responding
+- [ ] GC service running (check logs)
+- [ ] Rate limiting active on checkout endpoints
+- [ ] Tests passing (`npm test`)
+
+## Performance & Monitoring
+
+### Logging
+- Structured JSON logs via custom logger
+- Log levels: INFO, ERROR, DEBUG
+- Key events logged:
+  - Reservation created/expired/consumed
+  - Order confirmation attempts
+  - Low-stock alerts created
+  - GC cycle statistics
+
+### Metrics to Monitor
+- Reservation success/failure rate
+- Order confirmation success rate
+- GC cycle duration and expired count
+- API response times (especially /reserve and /confirm)
+- Database connection pool status
+
+### Recommended Tools
+- **Logging**: Datadog, LogRocket, or Papertrail
+- **APM**: New Relic or Datadog APM
+- **Uptime**: UptimeRobot or Pingdom
+- **Database**: MongoDB Atlas built-in monitoring
+
+## Troubleshooting
+
+### Common Issues
+
+**"MongooseError: Operation buffering timed out"**
+- Check MongoDB connection string
+- Ensure cluster is a replica set
+- Verify network access (IP whitelist)
+
+**"Transaction failed"**
+- Ensure MongoDB is a replica set (required for transactions)
+- Check if multiple operations are conflicting
+- Review logs for specific error details
+
+**"Reservation expired" (410 error)**
+- Reservation TTL is 10 minutes
+- User took too long to confirm
+- GC service expired the reservation
+- Solution: Create a new reservation
+
+**"Insufficient stock" (409 error)**
+- Race condition: another user reserved the item first
+- Stock is genuinely unavailable
+- Check `available = stock - reserved` in database
+
+**Tests failing with "MONGODB_URI not found"**
+- Ensure `.env` file exists in backend directory
+- Run `cp .env.example .env` and configure
+- Or set `MONGODB_URI` environment variable
+
+## Contributing
+
+### Code Style
+- TypeScript with strict mode
+- ESLint + Prettier for formatting
+- Run `npm run lint` before committing
+
+### Testing
+- Write tests for new features
+- Maintain >80% code coverage
+- Run `npm test` before pushing
+
+### Commit Messages
+- Use conventional commits format
+- Examples:
+  - `feat: add product search endpoint`
+  - `fix: resolve race condition in reservation`
+  - `test: add concurrency tests for confirm`
+
+## License
+
+MIT
+
+## Support
+
+For issues or questions:
+- Check the [Implementation Plan](../Docs/SureStock_Implementation_Plan.md)
+- Review test files for usage examples
+- Check logs for detailed error messages
+
+---
+
+**Built with ❤️ using Node.js, Express, TypeScript, and MongoDB**
