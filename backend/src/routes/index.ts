@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import healthRouter from './health';
+import cartRouter from './cart';
+import checkoutRouter from './checkout';
+import adminRouter from './admin';
 import { extractUserId } from '../middleware/user';
 import { checkoutRateLimiter } from '../middleware/rateLimit';
 
@@ -8,16 +11,13 @@ const router = Router();
 // Health check (no auth required)
 router.use('/api', healthRouter);
 
-// Apply user authentication to all /api/* routes except health
-// (Future routes will be added here and will automatically get auth)
+// Cart endpoints (require authentication)
+router.use('/api/cart', extractUserId, cartRouter);
 
-// Apply rate limiting to checkout endpoints
-// (Will be used when checkout routes are added)
-router.use('/api/checkout/*', checkoutRateLimiter);
+// Checkout endpoints (require authentication + rate limiting)
+router.use('/api/checkout', extractUserId, checkoutRateLimiter, checkoutRouter);
 
-// Placeholder for future routes:
-// router.use('/api/cart', extractUserId, cartRouter);
-// router.use('/api/checkout', extractUserId, checkoutRouter);
-// router.use('/api/admin', extractUserId, adminRouter);
+// Admin endpoints (require authentication)
+router.use('/api/admin', extractUserId, adminRouter);
 
 export default router;
