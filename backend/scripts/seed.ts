@@ -39,7 +39,7 @@ const BRANDS = [
   'LuxuryLine',
 ];
 
-// Category-specific product types for more realistic data
+// Category-specific product types and image keywords
 const PRODUCT_TYPES: Record<string, string[]> = {
   Electronics: [
     'Wireless Headphones',
@@ -115,6 +115,16 @@ const PRODUCT_TYPES: Record<string, string[]> = {
   ],
 };
 
+// Category-specific placeholder colors and text
+const CATEGORY_PLACEHOLDERS: Record<string, { bg: string; text: string; label: string }> = {
+  Electronics: { bg: '4A90E2', text: 'FFFFFF', label: 'Electronics' },
+  Clothing: { bg: 'E94B3C', text: 'FFFFFF', label: 'Fashion' },
+  'Home & Kitchen': { bg: 'F5A623', text: 'FFFFFF', label: 'Home' },
+  'Sports & Outdoors': { bg: '7ED321', text: 'FFFFFF', label: 'Sports' },
+  Books: { bg: '9013FE', text: 'FFFFFF', label: 'Books' },
+  'Toys & Games': { bg: 'FF6B9D', text: 'FFFFFF', label: 'Toys' },
+};
+
 const PRODUCT_COUNT = 150; // Between 120-200
 const DEMO_USER_ID = 'demo-user';
 const DEMO_CART_ITEMS_COUNT = 3; // 2-4 items
@@ -147,6 +157,8 @@ function generateProducts(): ProductSeed[] {
       const adjectives = ['Premium', 'Deluxe', 'Pro', 'Elite', 'Classic', 'Modern', 'Essential'];
       const adjective = Math.random() > 0.5 ? faker.helpers.arrayElement(adjectives) + ' ' : '';
 
+      const placeholder = CATEGORY_PLACEHOLDERS[category];
+      
       products.push({
         sku: `${category.substring(0, 3).toUpperCase()}-${String(skuCounter).padStart(5, '0')}`,
         name: `${brand} ${adjective}${productType}`,
@@ -154,7 +166,7 @@ function generateProducts(): ProductSeed[] {
         stock: faker.number.int({ min: 0, max: 150 }),
         reserved: 0,
         lowStockThreshold: faker.number.int({ min: 5, max: 15 }),
-        image: `https://picsum.photos/seed/${skuCounter}/400/400`,
+        image: `https://placehold.co/400x400/${placeholder.bg}/${placeholder.text}?text=${encodeURIComponent(placeholder.label)}`,
       });
 
       skuCounter++;
@@ -166,6 +178,7 @@ function generateProducts(): ProductSeed[] {
     const category = faker.helpers.arrayElement(CATEGORIES);
     const brand = faker.helpers.arrayElement(BRANDS);
     const productType = faker.helpers.arrayElement(PRODUCT_TYPES[category]);
+    const placeholder = CATEGORY_PLACEHOLDERS[category];
 
     products.push({
       sku: `${category.substring(0, 3).toUpperCase()}-${String(skuCounter).padStart(5, '0')}`,
@@ -174,7 +187,7 @@ function generateProducts(): ProductSeed[] {
       stock: faker.number.int({ min: 0, max: 150 }),
       reserved: 0,
       lowStockThreshold: faker.number.int({ min: 5, max: 15 }),
-      image: `https://picsum.photos/seed/${skuCounter}/400/400`,
+      image: `https://placehold.co/400x400/${placeholder.bg}/${placeholder.text}?text=${encodeURIComponent(placeholder.label)}`,
     });
 
     skuCounter++;

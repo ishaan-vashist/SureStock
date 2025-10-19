@@ -2,15 +2,21 @@ import mongoose from 'mongoose';
 import { Cart, Product } from '../models';
 import { errors } from '../middleware/errors';
 
-interface CartItemResponse {
-  productId: string;
+interface ProductSnapshot {
+  _id: string;
   sku: string;
   name: string;
   priceCents: number;
   stock: number;
   reserved: number;
   available: number;
+  image: string;
+}
+
+interface CartItemResponse {
+  productId: string;
   qty: number;
+  product: ProductSnapshot;
 }
 
 interface CartResponse {
@@ -53,13 +59,17 @@ export class CartService {
 
       items.push({
         productId: product._id.toString(),
-        sku: product.sku,
-        name: product.name,
-        priceCents: product.priceCents,
-        stock: product.stock,
-        reserved: product.reserved,
-        available,
         qty: cartItem.qty,
+        product: {
+          _id: product._id.toString(),
+          sku: product.sku,
+          name: product.name,
+          priceCents: product.priceCents,
+          stock: product.stock,
+          reserved: product.reserved,
+          available,
+          image: product.image,
+        },
       });
 
       total += itemTotal;

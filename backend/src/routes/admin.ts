@@ -24,10 +24,28 @@ router.get(
       }
 
       // Fetch alerts, newest first, with product details
-      const alerts = await LowStockAlert.find(query)
+      const rawAlerts = await LowStockAlert.find(query)
         .populate('productId', 'sku name stock lowStockThreshold')
         .sort({ createdAt: -1 })
         .lean();
+
+      // Transform to match frontend Alert interface
+      const alerts = rawAlerts.map((alert: any) => {
+        const product = alert.productId;
+        const isOutOfStock = alert.stockAfter === 0;
+        
+        return {
+          _id: alert._id.toString(),
+          type: isOutOfStock ? 'out_of_stock' : 'low_stock',
+          productId: product?._id?.toString(),
+          sku: product?.sku,
+          message: isOutOfStock
+            ? `Product ${product?.sku || 'Unknown'} is out of stock`
+            : `Product ${product?.sku || 'Unknown'} stock (${alert.stockAfter}) below threshold (${alert.threshold})`,
+          processed: alert.processed,
+          createdAt: alert.createdAt,
+        };
+      });
 
       res.json({
         count: alerts.length,
